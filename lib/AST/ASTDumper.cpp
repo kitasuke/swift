@@ -23,6 +23,7 @@
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/AST/TypeVisitor.h"
+#include "swift/Basic/Defer.h"
 #include "swift/Basic/QuotedString.h"
 #include "swift/Basic/STLExtras.h"
 #include "llvm/ADT/APFloat.h"
@@ -2934,7 +2935,8 @@ static void dumpProtocolConformanceRec(
       break;
 
     out << '\n';
-    conf->getSubstitutionMap().dump(out, indent + 2);
+    conf->getSubstitutionMap().dump(out, SubstitutionMap::DumpStyle::Full,
+                                    indent + 2);
     out << '\n';
     for (auto subReq : conf->getConditionalRequirements()) {
       out.indent(indent + 2);
@@ -2968,7 +2970,9 @@ void ProtocolConformance::dump(llvm::raw_ostream &out, unsigned indent) const {
   dumpProtocolConformanceRec(this, out, indent, visited);
 }
 
-void SubstitutionMap::dump(llvm::raw_ostream &out, unsigned indent) const {
+void SubstitutionMap::dump(llvm::raw_ostream &out,
+                           SubstitutionMap::DumpStyle style,
+                           unsigned indent) const {
   auto *genericSig = getGenericSignature();
   out.indent(indent);
 
@@ -2976,10 +2980,10 @@ void SubstitutionMap::dump(llvm::raw_ostream &out, unsigned indent) const {
     PrintWithColorRAII(out, ParenthesisColor) << p;
   };
   printParen('(');
+  SWIFT_DEFER { printParen(')'); };
   out << "substitution_map generic_signature=";
   if (genericSig == nullptr) {
     out << "<nullptr>";
-    printParen(')');
     return;
   }
 
@@ -2987,8 +2991,12 @@ void SubstitutionMap::dump(llvm::raw_ostream &out, unsigned indent) const {
   auto genericParams = genericSig->getGenericParams();
   auto replacementTypes = getReplacementTypesBuffer();
   for (unsigned i : indices(genericParams)) {
-    out << "\n";
-    out.indent(indent + 2);
+    if (style == SubstitutionMap::DumpStyle::Minimal) {
+      out << " ";
+    } else {
+      out << "\n";
+      out.indent(indent + 2);
+    }
     printParen('(');
     out << "substitution ";
     genericParams[i]->print(out);
@@ -2999,6 +3007,10 @@ void SubstitutionMap::dump(llvm::raw_ostream &out, unsigned indent) const {
       out << "<<unresolved concrete type>>";
     printParen(')');
   }
+  // A minimal dump doesn't need the details about the conformances, a lot of
+  // that info can be inferred from the signature.
+  if (style == SubstitutionMap::DumpStyle::Minimal)
+    return;
 
   // We only really need to print a conformance once across this whole map.
   llvm::SmallPtrSet<const ProtocolConformance *, 8> visited;
