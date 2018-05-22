@@ -1832,6 +1832,7 @@ public:
     printArgumentLabels(E->getArgumentLabels());
     OS << "\n";
     printRec(E->getArg());
+    PrintWithColorRAII(OS, ParenthesisColor) << ')';
   }
 
   void visitDiscardAssignmentExpr(DiscardAssignmentExpr *E) {
