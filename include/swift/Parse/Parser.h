@@ -1625,6 +1625,7 @@ public:
   ParserStatus parseExprOrStmt(ASTNode &Result);
   ParserResult<Stmt> parseStmtBreak();
   ParserResult<Stmt> parseStmtContinue();
+  ParsedSyntaxResult<ParsedStmtSyntax> parseStmtReturnSyntax(SourceLoc tryLoc);
   ParserResult<Stmt> parseStmtReturn(SourceLoc tryLoc);
   ParserResult<Stmt> parseStmtYield(SourceLoc tryLoc);
   ParserResult<Stmt> parseStmtThrow(SourceLoc tryLoc);

@@ -53,6 +53,11 @@ public:
                                        const SourceLoc, Identifier &Identifier);
 
 public:
+    //===--------------------------------------------------------------------===//
+    // Stmts.
+    Stmt *generate(const syntax::StmtSyntax &Stmt, const SourceLoc Loc);
+    Stmt *generate(const syntax::ReturnStmtSyntax &Stmt, const SourceLoc Loc);
+
   //===--------------------------------------------------------------------===//
   // Decls.
 

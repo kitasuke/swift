@@ -42,6 +42,18 @@ SourceLoc ASTGen::generateIdentifierDeclName(const syntax::TokenSyntax &Tok,
   return advanceLocBegin(Loc, Tok);
 }
 
+Stmt *ASTGen::generate(const StmtSyntax &S, const SourceLoc Loc) {
+    Stmt *StmtAST = nullptr;
+
+    if (auto returnStmt = S.getAs<ReturnStmtSyntax>()) {
+        StmtAST = generate(*returnStmt, Loc);
+    } else {
+        llvm_unreachable("unsupported stmt kind");
+    }
+
+    return StmtAST;
+}
+
 Decl *ASTGen::generate(const DeclSyntax &D, const SourceLoc Loc) {
   Decl *DeclAST = nullptr;
 

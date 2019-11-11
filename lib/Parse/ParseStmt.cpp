@@ -22,6 +22,7 @@
 #include "swift/Parse/CodeCompletionCallbacks.h"
 #include "swift/Parse/Lexer.h"
 #include "swift/Parse/Parser.h"
+#include "swift/Parse/ParsedSyntaxBuilders.h"
 #include "swift/Parse/SyntaxParsingContext.h"
 #include "swift/Subsystems.h"
 #include "swift/Syntax/TokenSyntax.h"
@@ -765,6 +766,74 @@ ParserResult<Stmt> Parser::parseStmtContinue() {
   return makeParserResult(new (Context) ContinueStmt(Loc, Target, TargetLoc));
 }
 
+ParsedSyntaxResult<ParsedStmtSyntax> Parser::parseStmtReturnSyntax(SourceLoc tryLoc) {
+    ParsedReturnStmtSyntaxBuilder builder(*SyntaxContext);
+
+    SourceLoc ReturnLoc = consumeToken(tok::kw_return);
+    auto returnTok = consumeTokenSyntax(tok::kw_return);
+    builder.useReturnKeyword(std::move(returnTok));
+
+    // TODO
+    if (Tok.is(tok::code_complete)) {
+        auto CCE = new (Context) CodeCompletionExpr(SourceRange(Tok.getLoc()));
+        auto Result = makeParsedResult(builder.build());
+        if (CodeCompletion) {
+            CodeCompletion->completeReturnStmt(CCE);
+        }
+        Result.setHasCodeCompletion();
+        consumeToken();
+        return Result;
+    }
+
+    // Handle the ambiguity between consuming the expression and allowing the
+    // enclosing stmt-brace to get it by eagerly eating it unless the return is
+    // followed by a '}', ';', statement or decl start keyword sequence.
+    if (Tok.isNot(tok::r_brace, tok::semi, tok::eof, tok::pound_if,
+                  tok::pound_error, tok::pound_warning, tok::pound_endif,
+                  tok::pound_else, tok::pound_elseif) &&
+        !isStartOfStmt() && !isStartOfDecl()) {
+      SourceLoc ExprLoc = Tok.getLoc();
+
+      // Issue a warning when the returned expression is on a different line than
+      // the return keyword, but both have the same indentation.
+      if (SourceMgr.getLineAndColumn(ReturnLoc).second ==
+          SourceMgr.getLineAndColumn(ExprLoc).second) {
+        diagnose(ExprLoc, diag::unindented_code_after_return);
+        diagnose(ExprLoc, diag::indent_expression_to_silence);
+      }
+
+      auto parsed = parseExpressionSyntax(diag::expected_expr_return);
+
+      if (parsed.isNull()) {
+        // Create an ErrorExpr to tell the type checker that this return
+        // statement had an expression argument in the source.  This suppresses
+        // the error about missing return value in a non-void function.
+        parsed = makeParsedError(parsed.get());
+//        parsed = makeParserErrorResult(new (Context) ErrorExpr(ExprLoc));
+      }
+      builder.useExpression(parsed.get());
+
+      if (tryLoc.isValid()) {
+        diagnose(tryLoc, diag::try_on_return_throw_yield, /*return=*/0)
+          .fixItInsert(ExprLoc, "try ")
+          .fixItRemoveChars(tryLoc, ReturnLoc);
+
+        // Note: We can't use tryLoc here because that's outside the ReturnStmt's
+        // source range.
+//        if (Result.isNonNull() && !isa<ErrorExpr>(Result.get()))
+//          Result = makeParserResult(new (Context) TryExpr(ExprLoc, Result.get()));
+      }
+
+        return makeParsedResult(builder.build());
+//      return makeParserResult(
+//          Result, new (Context) ReturnStmt(ReturnLoc, Result.getPtrOrNull()));
+    }
+
+    if (tryLoc.isValid())
+      diagnose(tryLoc, diag::try_on_stmt, "return");
+
+    return makeParsedResult(builder.build());
+}
 
 /// parseStmtReturn
 ///
@@ -772,64 +841,17 @@ ParserResult<Stmt> Parser::parseStmtContinue() {
 ///     'return' expr?
 ///   
 ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
-  SyntaxContext->setCreateSyntax(SyntaxKind::ReturnStmt);
-  SourceLoc ReturnLoc = consumeToken(tok::kw_return);
 
-  if (Tok.is(tok::code_complete)) {
-    auto CCE = new (Context) CodeCompletionExpr(SourceRange(Tok.getLoc()));
-    auto Result = makeParserResult(new (Context) ReturnStmt(ReturnLoc, CCE));
-    if (CodeCompletion) {
-      CodeCompletion->completeReturnStmt(CCE);
-    }
-    Result.setHasCodeCompletion();
-    consumeToken();
-    return Result;
-  }
+  SourceLoc leadingLoc = Tok.getLoc();
 
-  // Handle the ambiguity between consuming the expression and allowing the
-  // enclosing stmt-brace to get it by eagerly eating it unless the return is
-  // followed by a '}', ';', statement or decl start keyword sequence.
-  if (Tok.isNot(tok::r_brace, tok::semi, tok::eof, tok::pound_if, 
-                tok::pound_error, tok::pound_warning, tok::pound_endif,
-                tok::pound_else, tok::pound_elseif) &&
-      !isStartOfStmt() && !isStartOfDecl()) {
-    SourceLoc ExprLoc = Tok.getLoc();
+  auto parsed = parseStmtReturnSyntax(tryLoc);
+  assert(!parsed.isNull());
 
-    // Issue a warning when the returned expression is on a different line than
-    // the return keyword, but both have the same indentation.
-    if (SourceMgr.getLineAndColumn(ReturnLoc).second ==
-        SourceMgr.getLineAndColumn(ExprLoc).second) {
-      diagnose(ExprLoc, diag::unindented_code_after_return);
-      diagnose(ExprLoc, diag::indent_expression_to_silence);
-    }
+  SyntaxContext->addSyntax(parsed.get());
+  auto syntax = SyntaxContext->topNode<ReturnStmtSyntax>();
+  auto result = Generator.generate(syntax, leadingLoc);
 
-    ParserResult<Expr> Result = parseExpr(diag::expected_expr_return);
-    if (Result.isNull()) {
-      // Create an ErrorExpr to tell the type checker that this return
-      // statement had an expression argument in the source.  This suppresses
-      // the error about missing return value in a non-void function.
-      Result = makeParserErrorResult(new (Context) ErrorExpr(ExprLoc));
-    }
-
-    if (tryLoc.isValid()) {
-      diagnose(tryLoc, diag::try_on_return_throw_yield, /*return=*/0)
-        .fixItInsert(ExprLoc, "try ")
-        .fixItRemoveChars(tryLoc, ReturnLoc);
-
-      // Note: We can't use tryLoc here because that's outside the ReturnStmt's
-      // source range.
-      if (Result.isNonNull() && !isa<ErrorExpr>(Result.get()))
-        Result = makeParserResult(new (Context) TryExpr(ExprLoc, Result.get()));
-    }
-
-    return makeParserResult(
-        Result, new (Context) ReturnStmt(ReturnLoc, Result.getPtrOrNull()));
-  }
-
-  if (tryLoc.isValid())
-    diagnose(tryLoc, diag::try_on_stmt, "return");
-
-  return makeParserResult(new (Context) ReturnStmt(ReturnLoc, nullptr));
+  return makeParserResult(result);
 }
 
 /// parseStmtYield
