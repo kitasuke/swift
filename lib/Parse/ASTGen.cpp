@@ -234,6 +234,10 @@ Stmt *ASTGen::generate(const StmtSyntax &S, const SourceLoc Loc) {
 
   if (auto breakStmt = S.getAs<BreakStmtSyntax>()) {
     StmtAST = generate(*breakStmt, Loc);
+  } else if (auto returnStmt = S.getAs<ReturnStmtSyntax>()) {
+    StmtAST = generate(*returnStmt, Loc);
+  } else if (auto unknownStmt = S.getAs<UnknownStmtSyntax>()) {
+    StmtAST = generate(*unknownStmt, Loc);
   } else {
     #ifndef NDEBUG
       S.dump();
@@ -256,6 +260,45 @@ Stmt *ASTGen::generate(const BreakStmtSyntax &Stmt, const SourceLoc Loc) {
   }
 
   return new (Context) BreakStmt(breakLoc, Target, TargetLoc);
+}
+
+Stmt *ASTGen::generate(const ReturnStmtSyntax &Stmt, const SourceLoc Loc) {
+  auto returnTok = Stmt.getReturnKeyword();
+  SourceLoc returnLoc = advanceLocBegin(Loc, returnTok);
+  
+  if (auto exprTok = Stmt.getExpression()) {
+    SourceLoc exprLoc = advanceLocBegin(Loc, *exprTok);
+    
+    if (exprTok->is<CodeCompletionExprSyntax>()) {
+      auto CCE = new (Context) CodeCompletionExpr(SourceRange(exprLoc));
+      return new (Context) ReturnStmt(returnLoc, CCE);
+    }
+    
+    auto expression = generate(*exprTok, exprLoc);
+    return new (Context) ReturnStmt(returnLoc, expression);
+  }
+  
+  return new (Context) ReturnStmt(returnLoc, nullptr);
+}
+
+Stmt *ASTGen::generate(const UnknownStmtSyntax &Stmt, const SourceLoc Loc) {
+  if (Stmt.getNumChildren() == 2 && Stmt.getChild(0)->isToken()) {
+    Syntax Token = *Stmt.getChild(0);
+    tok Kind = Token.getRaw()->getTokenKind();
+    switch (Kind) {
+    case tok::kw_try: {
+      auto Tok = *Stmt.getChild(1);
+      if (auto StmtTok = Tok.getAs<StmtSyntax>()) {
+        auto StmtLoc = advanceLocBegin(Loc, Tok);
+        return generate(*StmtTok, StmtLoc);
+      }
+      return nullptr;
+    }
+    default:
+      return nullptr;
+    }
+  }
+  return nullptr;
 }
 
 Expr *ASTGen::generate(const ExprSyntax &E, const SourceLoc Loc) {

@@ -23,6 +23,7 @@
 #include "swift/Parse/Lexer.h"
 #include "swift/Parse/Parser.h"
 #include "swift/Parse/ParsedSyntaxBuilders.h"
+#include "swift/Parse/ParsedSyntaxRecorder.h"
 #include "swift/Parse/SyntaxParsingContext.h"
 #include "swift/Subsystems.h"
 #include "swift/Syntax/TokenSyntax.h"
@@ -784,18 +785,22 @@ ParserResult<Stmt> Parser::parseStmtContinue() {
 ///
 ///   stmt-return:
 ///     'return' expr?
-///   
-ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
-  SyntaxContext->setCreateSyntax(SyntaxKind::ReturnStmt);
-  SourceLoc ReturnLoc = consumeToken(tok::kw_return);
+///
+ParsedSyntaxResult<ParsedStmtSyntax> Parser::parseStmtReturnSyntax(SourceLoc tryLoc) {
+  ParsedReturnStmtSyntaxBuilder builder(*SyntaxContext);
 
+  SourceLoc ReturnLoc = Tok.getLoc();
+  auto ReturnTok = consumeTokenSyntax(tok::kw_return);
+  builder.useReturnKeyword(std::move(ReturnTok));
+  
   if (Tok.is(tok::code_complete)) {
-    auto CCE = new (Context) CodeCompletionExpr(SourceRange(Tok.getLoc()));
-    auto Result = makeParserResult(new (Context) ReturnStmt(ReturnLoc, CCE));
-    if (CodeCompletion) {
-      CodeCompletion->completeReturnStmt(CCE);
-    }
-    Result.setHasCodeCompletion();
+    auto CCE = makeParsedCodeCompletion(
+      ParsedSyntaxRecorder::makeCodeCompletionExpr(
+        None, None, consumeTokenSyntax(tok::code_complete),
+        *SyntaxContext));
+    
+    builder.useExpression(CCE.get());
+    auto Result = makeParsedResult(builder.build());
     consumeToken();
     return Result;
   }
@@ -803,7 +808,7 @@ ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
   // Handle the ambiguity between consuming the expression and allowing the
   // enclosing stmt-brace to get it by eagerly eating it unless the return is
   // followed by a '}', ';', statement or decl start keyword sequence.
-  if (Tok.isNot(tok::r_brace, tok::semi, tok::eof, tok::pound_if, 
+  if (Tok.isNot(tok::r_brace, tok::semi, tok::eof, tok::pound_if,
                 tok::pound_error, tok::pound_warning, tok::pound_endif,
                 tok::pound_else, tok::pound_elseif) &&
       !isStartOfStmt() && !isStartOfDecl()) {
@@ -816,13 +821,13 @@ ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
       diagnose(ExprLoc, diag::unindented_code_after_return);
       diagnose(ExprLoc, diag::indent_expression_to_silence);
     }
-
-    ParserResult<Expr> Result = parseExpr(diag::expected_expr_return);
+    
+    auto Result = parseExpressionSyntax(diag::expected_expr_return);
     if (Result.isNull()) {
       // Create an ErrorExpr to tell the type checker that this return
       // statement had an expression argument in the source.  This suppresses
       // the error about missing return value in a non-void function.
-      Result = makeParserErrorResult(new (Context) ErrorExpr(ExprLoc));
+      return makeParsedError(builder.build());
     }
 
     if (tryLoc.isValid()) {
@@ -831,19 +836,35 @@ ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
         .fixItRemoveChars(tryLoc, ReturnLoc);
 
       // Note: We can't use tryLoc here because that's outside the ReturnStmt's
-      // source range.
-      if (Result.isNonNull() && !isa<ErrorExpr>(Result.get()))
-        Result = makeParserResult(new (Context) TryExpr(ExprLoc, Result.get()));
+      // source range, so return it as UnknownStmt.
+      if (!Result.isNull()) {
+        SmallVector<ParsedSyntax, 0> nodes;
+        nodes.push_back(builder.build());
+        return makeParsedResult(
+          ParsedSyntaxRecorder::makeUnknownStmt(nodes, *SyntaxContext));
+      }
     }
 
-    return makeParserResult(
-        Result, new (Context) ReturnStmt(ReturnLoc, Result.getPtrOrNull()));
+    builder.useExpression(Result.get());
+    return makeParsedResult(builder.build());
   }
 
   if (tryLoc.isValid())
     diagnose(tryLoc, diag::try_on_stmt, "return");
 
-  return makeParserResult(new (Context) ReturnStmt(ReturnLoc, nullptr));
+  return makeParsedResult(builder.build());
+}
+
+ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
+  auto parsed = parseStmtReturnSyntax(tryLoc);
+  SyntaxContext->addSyntax(parsed.get());
+      
+  auto syntax = SyntaxContext->topNode<ReturnStmtSyntax>();
+  auto result = Generator.generate(syntax, leadingTriviaLoc());
+  if (parsed.isError()) {
+    return makeParserErrorResult(result);
+  }
+  return makeParserResult(result);
 }
 
 /// parseStmtYield

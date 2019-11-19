@@ -84,6 +84,8 @@ public:
 
   Stmt *generate(const syntax::StmtSyntax &Stmt, const SourceLoc Loc);
   Stmt *generate(const syntax::BreakStmtSyntax &Stmt, const SourceLoc Loc);
+  Stmt *generate(const syntax::ReturnStmtSyntax &Stmt, const SourceLoc Loc);
+  Stmt *generate(const syntax::UnknownStmtSyntax &Stmt, const SourceLoc Loc);
 
 public:
   //===--------------------------------------------------------------------===//
