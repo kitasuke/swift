@@ -271,10 +271,13 @@ Stmt *ASTGen::generate(const ReturnStmtSyntax &Stmt, const SourceLoc Loc) {
     
     if (exprTok->is<CodeCompletionExprSyntax>()) {
       auto CCE = new (Context) CodeCompletionExpr(SourceRange(exprLoc));
+      if (P.CodeCompletion) {
+        P.CodeCompletion->completeReturnStmt(CCE);
+      }
       return new (Context) ReturnStmt(returnLoc, CCE);
     }
     
-    auto expression = generate(*exprTok, exprLoc);
+    auto expression = generate(*exprTok, Loc);
     return new (Context) ReturnStmt(returnLoc, expression);
   }
   
@@ -282,22 +285,39 @@ Stmt *ASTGen::generate(const ReturnStmtSyntax &Stmt, const SourceLoc Loc) {
 }
 
 Stmt *ASTGen::generate(const UnknownStmtSyntax &Stmt, const SourceLoc Loc) {
-  if (Stmt.getNumChildren() == 2 && Stmt.getChild(0)->isToken()) {
-    Syntax Token = *Stmt.getChild(0);
-    tok Kind = Token.getRaw()->getTokenKind();
-    switch (Kind) {
-    case tok::kw_try: {
-      auto Tok = *Stmt.getChild(1);
-      if (auto StmtTok = Tok.getAs<StmtSyntax>()) {
-        auto StmtLoc = advanceLocBegin(Loc, Tok);
-        return generate(*StmtTok, StmtLoc);
-      }
-      return nullptr;
-    }
-    default:
-      return nullptr;
+  size_t targetIdx = 0;
+  
+  // Consider 'LABEL: stmt'
+  if (Stmt.getNumChildren() >= 3) {
+    if (Stmt.getChild(0)->isToken() &&
+      Stmt.getChild(0)->getAs<TokenSyntax>()->getTokenKind() == tok::identifier &&
+      Stmt.getChild(1)->getAs<TokenSyntax>()->getTokenKind() == tok::colon) {
+      targetIdx += 2;
     }
   }
+  
+  // Consider 'try stmt'
+  if (Stmt.getNumChildren() >= 2) {
+    if (Stmt.getChild(targetIdx)->getAs<TokenSyntax>()->getTokenKind() == tok::kw_try)
+      targetIdx += 1;
+  }
+    
+  if (targetIdx == 0)
+    return nullptr;
+  
+  auto stmtSyntax = Stmt.getChild(targetIdx)->getAs<StmtSyntax>();
+  if (!stmtSyntax)
+    return nullptr;
+  
+  auto stmtAST = generate(*stmtSyntax, Loc);
+  if (auto returnStmt = dyn_cast<ReturnStmt>(stmtAST)) {
+    if (auto resultExpr = returnStmt->getResult()) {
+      auto tryExpr = new (Context) TryExpr(resultExpr->getStartLoc(), resultExpr);
+      returnStmt->setResult(tryExpr);
+      return returnStmt;
+    }
+  }
+
   return nullptr;
 }
 

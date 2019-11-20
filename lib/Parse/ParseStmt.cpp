@@ -834,15 +834,6 @@ ParsedSyntaxResult<ParsedStmtSyntax> Parser::parseStmtReturnSyntax(SourceLoc try
       diagnose(tryLoc, diag::try_on_return_throw_yield, /*return=*/0)
         .fixItInsert(ExprLoc, "try ")
         .fixItRemoveChars(tryLoc, ReturnLoc);
-
-      // Note: We can't use tryLoc here because that's outside the ReturnStmt's
-      // source range, so return it as UnknownStmt.
-      if (!Result.isNull()) {
-        SmallVector<ParsedSyntax, 0> nodes;
-        nodes.push_back(builder.build());
-        return makeParsedResult(
-          ParsedSyntaxRecorder::makeUnknownStmt(nodes, *SyntaxContext));
-      }
     }
 
     builder.useExpression(Result.get());
@@ -856,11 +847,12 @@ ParsedSyntaxResult<ParsedStmtSyntax> Parser::parseStmtReturnSyntax(SourceLoc try
 }
 
 ParserResult<Stmt> Parser::parseStmtReturn(SourceLoc tryLoc) {
+  auto leadingLoc = leadingTriviaLoc();
   auto parsed = parseStmtReturnSyntax(tryLoc);
   SyntaxContext->addSyntax(parsed.get());
       
   auto syntax = SyntaxContext->topNode<ReturnStmtSyntax>();
-  auto result = Generator.generate(syntax, leadingTriviaLoc());
+  auto result = Generator.generate(syntax, leadingLoc);
   if (parsed.isError()) {
     return makeParserErrorResult(result);
   }
