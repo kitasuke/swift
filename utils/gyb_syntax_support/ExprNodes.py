@@ -473,7 +473,8 @@ EXPR_NODES = [
     # e.g. "abc \(foo()) def"
     Node('StringLiteralExpr', kind='Expr',
          children=[
-             Child('OpenDelimiter', kind='RawStringDelimiterToken', 
+             Child('OpenObjCDelimiter', kind='RawStringDelimiterToken', is_optional=True),
+             Child('OpenDelimiter', kind='RawStringDelimiterToken',
                    is_optional=True),
              Child('OpenQuote', kind='Token',
                    token_choices=[

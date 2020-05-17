@@ -200,6 +200,7 @@
                                               "kind": "StringLiteralExpr",
                                               "layout": [
                                                 null,
+                                                null,
                                                 {
                                                   "id": 69,
                                                   "tokenKind": {

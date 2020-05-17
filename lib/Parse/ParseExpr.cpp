@@ -1920,8 +1920,10 @@ ParserResult<Expr> Parser::parseExprStringLiteral() {
   // The start location of the entire string literal.
   SourceLoc Loc = Tok.getLoc();
 
-  StringRef OpenDelimiterStr, OpenQuoteStr, CloseQuoteStr, CloseDelimiterStr;
+  StringRef OpenObjCDelimiterStr, OpenDelimiterStr, OpenQuoteStr, CloseQuoteStr, CloseDelimiterStr;
   unsigned DelimiterLength = Tok.getCustomDelimiterLen();
+  unsigned OpenObjCDelimiterLength = Tok.hasObjCDelimiter() ? 1 : 0;
+  unsigned OpenDelimiterLength = OpenObjCDelimiterLength + DelimiterLength;
   bool HasCustomDelimiter = DelimiterLength > 0;
   unsigned QuoteLength;
   tok QuoteKind;
@@ -1931,8 +1933,9 @@ ParserResult<Expr> Parser::parseExprStringLiteral() {
                                           tok::single_quote: tok::string_quote);
   unsigned CloseQuoteBegin = Tok.getLength() - DelimiterLength - QuoteLength;
 
-  OpenDelimiterStr = Tok.getRawText().take_front(DelimiterLength);
-  OpenQuoteStr = Tok.getRawText().substr(DelimiterLength, QuoteLength);
+  OpenObjCDelimiterStr = Tok.getRawText().take_front(OpenObjCDelimiterLength);
+  OpenDelimiterStr = Tok.getRawText().substr(OpenObjCDelimiterLength, OpenDelimiterLength);
+  OpenQuoteStr = Tok.getRawText().substr(OpenDelimiterLength, QuoteLength);
   CloseQuoteStr = Tok.getRawText().substr(CloseQuoteBegin, QuoteLength);
   CloseDelimiterStr = Tok.getRawText().take_back(DelimiterLength);
 
@@ -1941,6 +1944,15 @@ ParserResult<Expr> Parser::parseExprStringLiteral() {
   Token CloseQuote(QuoteKind, CloseQuoteStr);
   ParsedTrivia EmptyTrivia;
   ParsedTrivia EntireTrailingTrivia = TrailingTrivia;
+
+  ParsedTrivia OpenDelimiterLeadingTrivia;
+  if (Tok.hasObjCDelimiter()) {
+    Token OpenObjCDelimiter(tok::raw_string_delimiter, OpenObjCDelimiterStr);
+    SyntaxContext->addToken(OpenObjCDelimiter, LeadingTrivia, EmptyTrivia);
+    OpenDelimiterLeadingTrivia = EmptyTrivia;
+  } else {
+    OpenDelimiterLeadingTrivia = LeadingTrivia;
+  }
 
   if (HasCustomDelimiter) {
     Token OpenDelimiter(tok::raw_string_delimiter, OpenDelimiterStr);

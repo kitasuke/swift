@@ -320,11 +320,12 @@ static void validateMultilineIndents(const Token &Str, DiagnosticEngine *Diags);
 
 void Lexer::formStringLiteralToken(const char *TokStart,
                                    bool IsMultilineString,
-                                   unsigned CustomDelimiterLen) {
+                                   unsigned CustomDelimiterLen,
+                                   bool HasObjCDelimiter) {
   formToken(tok::string_literal, TokStart);
   if (NextToken.is(tok::eof))
     return;
-  NextToken.setStringLiteral(IsMultilineString, CustomDelimiterLen);
+  NextToken.setStringLiteral(IsMultilineString, CustomDelimiterLen, HasObjCDelimiter);
 
   if (IsMultilineString && Diags)
     validateMultilineIndents(NextToken, Diags);
@@ -1253,6 +1254,21 @@ static bool advanceIfMultilineDelimiter(const char *&CurPtr,
   return false;
 }
 
+/// advanceIfObjCDelimiter - Extracts/detects ObjC delimiter on
+/// opening a string literal, advances CurPtr if a delimiter is found
+/// CurPtr[-1] must be '@' when called.
+static bool advanceIfObjCDelimiter(const char *&CurPtr,
+                                   DiagnosticEngine *Diags) {
+  assert(CurPtr[-1] == '@');
+
+  const char *TmpPtr = CurPtr;
+  if (diagnoseZeroWidthMatchAndAdvance('"', TmpPtr, Diags)) {
+    CurPtr = TmpPtr;
+    return true;
+  }
+  return false;
+}
+
 /// advanceIfCustomDelimiter - Extracts/detects any custom delimiter on
 /// opening a string literal, advances CurPtr if a delimiter is found and
 /// returns a non-zero delimiter length. CurPtr[-1] must be '#' when called.
@@ -1309,7 +1325,7 @@ static bool delimiterMatches(unsigned CustomDelimiterLen, const char *&BytesPtr,
 ///   character_escape  ::= unicode_character_escape
 unsigned Lexer::lexCharacter(const char *&CurPtr, char StopQuote,
                              bool EmitDiagnostics, bool IsMultilineString,
-                             unsigned CustomDelimiterLen) {
+                             unsigned CustomDelimiterLen, bool HasObjCDelimiter) {
   const char *CharStart = CurPtr;
 
   switch (*CurPtr++) {
@@ -1336,7 +1352,7 @@ unsigned Lexer::lexCharacter(const char *&CurPtr, char StopQuote,
       // Mutliline and custom escaping are only enabled for " quote.
       if (LLVM_UNLIKELY(StopQuote != '"'))
         return ~0U;
-      if (!IsMultilineString && !CustomDelimiterLen)
+      if (!IsMultilineString && !CustomDelimiterLen && !HasObjCDelimiter)
         return ~0U;
 
       DiagnosticEngine *D = EmitDiagnostics ? Diags : nullptr;
@@ -1576,6 +1592,10 @@ static const char *skipToEndOfInterpolatedExpression(const char *CurPtr,
 /// Extract content of string literal from inside quotes.
 static StringRef getStringLiteralContent(const Token &Str) {
   StringRef Bytes = Str.getText();
+
+  if (Str.hasObjCDelimiter()) {
+    Bytes = Bytes.drop_front(1);
+  }
 
   if (unsigned CustomDelimiterLen = Str.getCustomDelimiterLen())
     Bytes = Bytes.drop_front(CustomDelimiterLen).drop_back(CustomDelimiterLen);
@@ -1818,9 +1838,10 @@ static void diagnoseSingleQuoteStringLiteral(const char *TokStart,
 ///   string_literal ::= ["]([^"\\\n\r]|character_escape)*["]
 ///   string_literal ::= ["]["]["].*["]["]["] - approximately
 ///   string_literal ::= (#+)("")?".*"(\2\1) - "raw" strings
-void Lexer::lexStringLiteral(unsigned CustomDelimiterLen) {
+void Lexer::lexStringLiteral(unsigned CustomDelimiterLen, bool HasObjCDelimiter) {
+    const unsigned ObjCDelimiterLen = HasObjCDelimiter ? 1 : 0;
   const char QuoteChar = CurPtr[-1];
-  const char *TokStart = CurPtr - 1 - CustomDelimiterLen;
+  const char *TokStart = CurPtr - 1 - CustomDelimiterLen - ObjCDelimiterLen;
 
   // NOTE: We only allow single-quote string literals so we can emit useful
   // diagnostics about changing them to double quotes.
@@ -1865,7 +1886,7 @@ void Lexer::lexStringLiteral(unsigned CustomDelimiterLen) {
     }
 
     unsigned CharValue = lexCharacter(CurPtr, QuoteChar, true,
-                                      IsMultilineString, CustomDelimiterLen);
+                                      IsMultilineString, CustomDelimiterLen, HasObjCDelimiter);
     // This is the end of string, we are done.
     if (CharValue == ~0U)
       break;
@@ -1884,7 +1905,7 @@ void Lexer::lexStringLiteral(unsigned CustomDelimiterLen) {
     return formToken(tok::unknown, TokStart);
 
   return formStringLiteralToken(TokStart, IsMultilineString,
-                                CustomDelimiterLen);
+                                CustomDelimiterLen, HasObjCDelimiter);
 }
 
 
@@ -2387,7 +2408,11 @@ void Lexer::lexImpl() {
           "Embedded nul should be eaten by lexTrivia as LeadingTrivia");
     }
 
-  case '@': return formToken(tok::at_sign, TokStart);
+  case '@':
+    if (advanceIfObjCDelimiter(CurPtr, Diags)) {
+      return lexStringLiteral(0, true);
+    }
+    return formToken(tok::at_sign, TokStart);
   case '{': return formToken(tok::l_brace, TokStart);
   case '[': return formToken(tok::l_square, TokStart);
   case '(': return formToken(tok::l_paren, TokStart);

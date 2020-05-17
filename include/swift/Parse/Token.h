@@ -48,6 +48,9 @@ class Token {
   /// Length of custom delimiter of "raw" string literals
   unsigned CustomDelimiterLen : 8;
 
+  /// ObjC delimiter for string literals
+  unsigned ObjCDelimiter : 1;
+
   // Padding bits == 32 - 11;
 
   /// The length of the comment that precedes the token.
@@ -65,7 +68,7 @@ class Token {
 public:
   Token(tok Kind, StringRef Text, unsigned CommentLength = 0)
           : Kind(Kind), AtStartOfLine(false), EscapedIdentifier(false),
-            MultilineString(false), CustomDelimiterLen(0),
+            MultilineString(false), CustomDelimiterLen(0), ObjCDelimiter(false),
             CommentLength(CommentLength), Text(Text) {}
 
   Token() : Token(tok::NUM_TOKENS, {}, 0) {}
@@ -233,11 +236,16 @@ public:
   unsigned getCustomDelimiterLen() const {
     return CustomDelimiterLen;
   }
+  /// True if the string literal token is ObjC delimiter.
+  bool hasObjCDelimiter() const {
+    return ObjCDelimiter;
+  }
   /// Set characteristics of string literal token.
-  void setStringLiteral(bool IsMultilineString, unsigned CustomDelimiterLen) {
+  void setStringLiteral(bool IsMultilineString, unsigned CustomDelimiterLen, bool HasObjCDelimiter) {
     assert(Kind == tok::string_literal);
     this->MultilineString = IsMultilineString;
     this->CustomDelimiterLen = CustomDelimiterLen;
+    this->ObjCDelimiter = HasObjCDelimiter;
   }
   
   /// getLoc - Return a source location identifier for the specified
@@ -294,6 +302,7 @@ public:
     EscapedIdentifier = false;
     this->MultilineString = false;
     this->CustomDelimiterLen = 0;
+    this->ObjCDelimiter = false;
     assert(this->CustomDelimiterLen == CustomDelimiterLen &&
            "custom string delimiter length > 255");
   }
