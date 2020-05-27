@@ -1418,10 +1418,7 @@ ParserResult<Expr> Parser::parseExprPrimary(Diag<> ID, bool isExprBasic) {
     // input.
     if (peekToken().isNot(tok::string_literal))
       goto UnknownCharacter;
-    
-    diagnose(Tok.getLoc(), diag::string_literal_no_atsign)
-      .fixItRemove(Tok.getLoc());
-    consumeToken(tok::at_sign);
+
     LLVM_FALLTHROUGH;
       
   case tok::string_literal:  // "foo"

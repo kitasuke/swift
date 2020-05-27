@@ -741,9 +741,6 @@ func testRefutableLet() {
   // expected-error @-2 {{type annotation missing in pattern}}
 }
 
-// <rdar://problem/19833424> QoI: Bad error message when using Objective-C literals (@"Hello") in Swift files
-let myString = @"foo" // expected-error {{string literals in Swift are not preceded by an '@' sign}} {{16-17=}}
-
 // <rdar://problem/16990885> support curly quotes for string literals
 // expected-error @+1 {{unicode curly quote found, replace with '"'}} {{35-38="}}
 let curlyQuotes1 = “hello world!” // expected-error {{unicode curly quote found, replace with '"'}} {{20-23="}}
